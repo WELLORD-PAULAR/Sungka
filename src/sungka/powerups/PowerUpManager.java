@@ -4,37 +4,20 @@ import sungka.model.Player;
 import sungka.model.Pit;
 
 import java.util.*;
+import java.util.function.Supplier;
 
 public class PowerUpManager {
-    private final List<PowerUp> pool = new ArrayList<>();
+    private final List<Supplier<PowerUp>> pool = new ArrayList<>();
     private final Random rnd = new Random();
-
     public PowerUpManager() {
-        pool.add(new DoubleCapturePU());
-        pool.add(new BonusTurnPU());
-        pool.add(new ReverseSowPU());
-        pool.add(new ShellMagnetPU());
-        pool.add(new StealShellsPU());
-        pool.add(new PitShieldPU());
-        pool.add(new AddShellsPU());
-        pool.add(new SwapHousesPU());
-        pool.add(new SkipOpponentPU());
-        pool.add(new LuckyDropPU());
+        // by default enable all registered codes: populate pool from registry directly
+        pool.addAll(REGISTRY.values());
     }
 
     public PowerUp randomPowerUp() {
-        PowerUp p = pool.get(rnd.nextInt(pool.size()));
-        if (p instanceof DoubleCapturePU) return new DoubleCapturePU();
-        if (p instanceof BonusTurnPU) return new BonusTurnPU();
-        if (p instanceof ReverseSowPU) return new ReverseSowPU();
-        if (p instanceof ShellMagnetPU) return new ShellMagnetPU();
-        if (p instanceof StealShellsPU) return new StealShellsPU();
-        if (p instanceof PitShieldPU) return new PitShieldPU();
-        if (p instanceof AddShellsPU) return new AddShellsPU();
-        if (p instanceof SwapHousesPU) return new SwapHousesPU();
-        if (p instanceof SkipOpponentPU) return new SkipOpponentPU();
-        if (p instanceof LuckyDropPU) return new LuckyDropPU();
-        return new LuckyDropPU();
+        if (pool.isEmpty()) return null;
+        Supplier<PowerUp> sup = pool.get(rnd.nextInt(pool.size()));
+        return sup.get();
     }
 
     public void refillToCap(Player player, Pit[] board, int cap) {
@@ -48,7 +31,55 @@ public class PowerUpManager {
         for (int i = player.getStart(); i <= player.getEnd(); i++) if (board[i].hasPowerUp()) current++;
         int need = cap - current;
         for (int k = 0; k < need && k < empties.size(); k++) {
-            board[empties.get(k)].setPowerUp(randomPowerUp());
+            PowerUp p = randomPowerUp();
+            if (p != null) board[empties.get(k)].setPowerUp(p);
         }
+    }
+    // --- New API: allow enabling/disabling specific power-up codes ---
+    // Static registry of all supported power-up codes -> supplier
+    private static final Map<String, Supplier<PowerUp>> REGISTRY = new LinkedHashMap<>();
+    // cached set of all codes (LinkedHashSet preserves insertion order)
+    private static final Set<String> ALL_CODES;
+
+    static {
+        REGISTRY.put("D", DoubleCapturePU::new);
+        REGISTRY.put("B", BonusTurnPU::new);
+        REGISTRY.put("R", ReverseSowPU::new);
+        REGISTRY.put("M", ShellMagnetPU::new);
+        REGISTRY.put("S", StealShellsPU::new);
+        REGISTRY.put("P", PitShieldPU::new);
+        REGISTRY.put("A", AddShellsPU::new);
+        REGISTRY.put("W", SwapHousesPU::new);
+        REGISTRY.put("K", SkipOpponentPU::new);
+        REGISTRY.put("L", LuckyDropPU::new);
+        ALL_CODES = new LinkedHashSet<>(REGISTRY.keySet());
+    }
+    // Configure which power-up codes are enabled (codes are single letters like "P", "S", etc.).
+    public void setAllowedCodes(Collection<String> codes) {
+        pool.clear();
+        if (codes == null) codes = ALL_CODES;
+        for (String c : codes) {
+            Supplier<PowerUp> s = REGISTRY.get(c);
+            if (s != null) pool.add(s);
+        }
+    }
+
+    // Return a map of available power-up codes to their display name.
+    public static Map<String, String> getAvailableDefinitions() {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Supplier<PowerUp>> e : REGISTRY.entrySet()) {
+            PowerUp p = e.getValue().get();
+            out.put(e.getKey(), p.getName());
+        }
+        return out;
+    }
+    // Return a map of code -> description for available power-ups.
+    public static Map<String, String> getAvailableDescriptions() {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Supplier<PowerUp>> e : REGISTRY.entrySet()) {
+            PowerUp p = e.getValue().get();
+            out.put(e.getKey(), p.getDescription());
+        }
+        return out;
     }
 }

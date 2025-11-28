@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="sungka-up">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/sungka-up.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

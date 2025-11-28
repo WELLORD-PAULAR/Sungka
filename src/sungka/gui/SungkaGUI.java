@@ -2,6 +2,7 @@ package sungka.gui;
 
 import sungka.ai.SimpleAI;
 import sungka.core.SungkaGame;
+import sungka.config.GameConfig;
 import sungka.model.Pit;
 import sungka.model.Player;
 import sungka.powerups.PowerUp;
@@ -19,8 +20,9 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 
-public class SungkaGUI extends JFrame {
-    private final SungkaGame game;
+public final class SungkaGUI extends JFrame {
+    private static final long serialVersionUID = 1L;
+    private transient final SungkaGame game;
     private final JButton[] pitButtons = new JButton[16];
     private final JTextArea logArea = new JTextArea(6, 40);
     private boolean animating = false;
@@ -32,31 +34,39 @@ public class SungkaGUI extends JFrame {
     private JLabel activeBLabel = new JLabel("Active: None");
     private JLabel powerCountALabel = new JLabel("Power-ups left: 2");
     private JLabel powerCountBLabel = new JLabel("Power-ups left: 2");
-    private final java.util.Map<Player, Boolean> limitWarnShown = new java.util.HashMap<>();
+    private transient final java.util.Map<Player, Boolean> limitWarnShown = new java.util.HashMap<>();
     private int prevACount = -1;
     private int prevBCount = -1;
     private Timer pulseTimer;
-    private boolean pulseToggle = false;
 
     // AI support
     private final boolean aiEnabled;
-    private final Player aiPlayer; // which Player is controlled by AI, null if none
-    private final SimpleAI ai;
+    private transient final Player aiPlayer; // which Player is controlled by AI, null if none
+    private transient final SimpleAI ai;
     private final Timer aiTimer;
     // status labels (top row empty slots)
     private JLabel directionLabel;
     private JLabel turnLabel;
 
-    public SungkaGUI() { this(false, false, "Medium"); }
+    public SungkaGUI() { this(false, false, "Medium", null, GameConfig.getInstance().getWinThreshold()); }
 
     public SungkaGUI(boolean aiEnabled, boolean aiPlaysA, String difficultyStr) {
+        this(aiEnabled, aiPlaysA, difficultyStr, null, GameConfig.getInstance().getWinThreshold());
+    }
+
+    public SungkaGUI(boolean aiEnabled, boolean aiPlaysA, String difficultyStr, java.util.Set<String> enabledPowerUps, int winThreshold) {
         this.aiEnabled = aiEnabled;
         SimpleAI.Difficulty d;
         try { d = SimpleAI.Difficulty.valueOf(difficultyStr.toUpperCase()); }
         catch (Exception ex) { d = SimpleAI.Difficulty.MEDIUM; }
         this.ai = aiEnabled ? new SimpleAI(d) : null;
-
         game = new SungkaGame();
+        // apply configuration (if provided) — fall back to central GameConfig when null/invalid
+        java.util.Set<String> cfgPUs = enabledPowerUps;
+        if (cfgPUs == null) cfgPUs = GameConfig.getInstance().getEnabledPowerUps();
+        if (cfgPUs != null) game.setAllowedPowerUps(cfgPUs);
+        int cfgThresh = (winThreshold > 0) ? winThreshold : GameConfig.getInstance().getWinThreshold();
+        game.setWinThreshold(cfgThresh);
         this.aiPlayer = aiEnabled ? (aiPlaysA ? game.playerA : game.playerB) : null;
 
         game.setLogger((s) -> SwingUtilities.invokeLater(() -> {
@@ -126,8 +136,9 @@ public class SungkaGUI extends JFrame {
         topControls.add(hint, BorderLayout.CENTER);
         topControls.add(rightCounts, BorderLayout.EAST);
 
-        progressA = new JProgressBar(0, SungkaGame.WIN_THRESHOLD);
-        progressB = new JProgressBar(0, SungkaGame.WIN_THRESHOLD);
+        // Progress bars sized to this game's win threshold
+        progressA = new JProgressBar(0, game.getWinThreshold());
+        progressB = new JProgressBar(0, game.getWinThreshold());
         progressA.setPreferredSize(new Dimension(320,28));
         progressB.setPreferredSize(new Dimension(320,28));
         progressA.setStringPainted(true);
@@ -206,12 +217,40 @@ public class SungkaGUI extends JFrame {
     }
 
         private void showHelp() {
-            String help = "Rules/Controls:\n" +
-                    "- Click your own pit to play. If the pit contains a power-up, it will activate instead of sowing.\n" +
-                    "- Capturing an opponent pit steals its power-up (moved to a random empty pit on your side).\n" +
-                    "- After your turn ends, the system refills your side with random power-ups until you have 3.\n" +
-                    "- Power-up codes shown on a pit: D(DoubleCapture), B(BonusTurn), R(Reverse), M(Magnet), S(StealShells), P(PitShield), A(AddShells), W(SwapHouses), K(SkipOpp), L(LuckyDrop).\n";
-            JOptionPane.showMessageDialog(this, help, "Help", JOptionPane.INFORMATION_MESSAGE);
+            StringBuilder sb = new StringBuilder();
+            sb.append("Help — Current Rules & UI\n\n");
+            sb.append("Board / Controls:\n");
+            sb.append("- Click one of your pits to sow its shells. Houses (stores) are not playable.\n");
+            sb.append("- If a pit you own contains a power-up, clicking it will prompt you to activate that power-up instead of sowing.\n\n");
+
+            sb.append("Power-ups (summary):\n");
+            sb.append("- Power-ups appear on pits (single-letter code). Examples: P=PitShield, S=Steal, B=BonusTurn, R=Reverse, etc.\n");
+            sb.append("- Activating a power-up does NOT consume your normal sowing turn — you may still sow after activation unless an effect changes the turn.\n");
+            sb.append("- When you capture an opponent pit that contains a power-up, that power-up is activated immediately for you if you have remaining activations this turn.\n\n");
+
+            sb.append("Activation limits & wipe behavior:\n");
+            sb.append("- Each player may activate up to 2 power-ups per turn (this includes manual activations and immediate activations from captures).\n");
+            sb.append("- Once a player reaches the 2-per-turn activation limit, ALL power-ups on that player's side are cleared (wiped) immediately.\n\n");
+
+            sb.append("PitShield (P):\n");
+            sb.append("- Protects a single pit for 2 turns. While protected, the pit cannot be captured or have its power-up stolen/refilled. Protection is removed when a blocked capture occurs. Protected pits are outlined in the UI.\n\n");
+
+            sb.append("Power-up refresh & distribution:\n");
+            sb.append("- At the end of a player's turn the system may refill power-ups on that player's side up to the cap (skips protected pits).\n");
+            sb.append("- Captured power-ups are handled immediately (activation if possible) or placed/stored on the captor's side when possible.\n\n");
+
+            sb.append("UI indicators:\n");
+            sb.append("- Active power-up(s) for each player are shown left of the Help button.\n");
+            sb.append("- Remaining per-turn activations are shown right of the Help button as 'Power-ups left: N'.\n\n");
+
+            sb.append("AI notes:\n");
+            sb.append("- Built-in AI animates its sowing moves in the GUI and uses search with a small online learning bias.\n\n");
+
+            sb.append("Tips:\n");
+            sb.append("- Plan activations: hitting the 2-per-turn limit will wipe your side's power-ups.\n");
+            sb.append("- Use PitShield to protect high-value pits.\n");
+
+            JOptionPane.showMessageDialog(this, sb.toString(), "Help", JOptionPane.INFORMATION_MESSAGE);
         }
 
     
@@ -398,7 +437,7 @@ public class SungkaGUI extends JFrame {
         if (winner != null) {
             if (aiTimer != null) aiTimer.stop();
             appendMatchHistory(winner.getName(), game.board[game.playerA.getHouseIndex()].getStones(), game.board[game.playerB.getHouseIndex()].getStones());
-            JOptionPane.showMessageDialog(this, winner.getName() + " reached " + SungkaGame.WIN_THRESHOLD + " shells and wins!", "Game Over", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, winner.getName() + " reached " + game.getWinThreshold() + " shells and wins!", "Game Over", JOptionPane.INFORMATION_MESSAGE);
             SwingUtilities.invokeLater(() -> new MainMenu().setVisible(true));
             dispose();
         }
@@ -407,9 +446,9 @@ public class SungkaGUI extends JFrame {
         int aCount = game.board[game.playerA.getHouseIndex()].getStones();
         int bCount = game.board[game.playerB.getHouseIndex()].getStones();
         progressA.setValue(aCount);
-        progressA.setString(aCount + " / " + SungkaGame.WIN_THRESHOLD);
+        progressA.setString(aCount + " / " + game.getWinThreshold());
         progressB.setValue(bCount);
-        progressB.setString(bCount + " / " + SungkaGame.WIN_THRESHOLD);
+        progressB.setString(bCount + " / " + game.getWinThreshold());
 
         // show active power-ups for each player
         if (activeALabel != null) {
@@ -439,7 +478,7 @@ public class SungkaGUI extends JFrame {
         }
 
         // highlight when within 5 shells of winning (pulse border and beep once on crossing)
-        int thresh = SungkaGame.WIN_THRESHOLD;
+        int thresh = game.getWinThreshold();
         boolean aNear = (aCount < thresh && thresh - aCount <= 5);
         boolean bNear = (bCount < thresh && thresh - bCount <= 5);
 

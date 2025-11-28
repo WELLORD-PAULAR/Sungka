@@ -3,17 +3,27 @@ package sungka.core;
 import sungka.model.Pit;
 import sungka.model.Player;
 import sungka.powerups.PowerUpManager;
+import sungka.config.GameConfig;
 import sungka.powerups.PowerUp;
 
 import java.util.*;
 
-public class SungkaGame {
+    // Core game model: board, players, turn logic, power-ups and win detection.
+    // Final to avoid subclassing and to prevent 'this' escaping during construction.
+public final class SungkaGame {
     public static final int WIN_THRESHOLD = 50;
+    // instance-level win threshold (configurable per-game)
+    private int winThreshold = WIN_THRESHOLD;
     // 16 pits: 0..6 small B, 7 house B, 8..14 small A, 15 house A
     public Pit[] board = new Pit[16];
+    // Board layout: 0..6 small pits (Player B side), 7 house B,
+    // 8..14 small pits (Player A side), 15 house A
     public final Player playerB, playerA;
+    // the player who has the current turn
     Player current;
+    // power-up manager (supplies and refills power-ups)
     PowerUpManager pum = new PowerUpManager();
+    // pseudo-random source for placement choices
     Random rnd = new Random();
 
     // flags & states for power-ups
@@ -33,6 +43,7 @@ public class SungkaGame {
     // logging hook for GUI
     private ConsumerLogger logger = (s) -> {};
 
+    // Initialize board, players, and fill initial power-ups via PowerUpManager.
     public SungkaGame() {
         for (int i = 0; i < 16; i++) {
             if (i == 7 || i == 15) board[i] = new Pit(0, true);
@@ -46,32 +57,68 @@ public class SungkaGame {
         powerUpsUsedThisTurn.put(playerA, 0);
         powerUpsUsedThisTurn.put(playerB, 0);
 
+        // Apply central pre-game configuration (if present) so direct construction
+        // of SungkaGame picks up user-selected allowed power-ups and win threshold.
+        java.util.Set<String> cfgPUs = GameConfig.getInstance().getEnabledPowerUps();
+        if (cfgPUs != null) pum.setAllowedCodes(cfgPUs);
+        this.winThreshold = GameConfig.getInstance().getWinThreshold();
+
         pum.refillToCap(playerA, board, 3);
         pum.refillToCap(playerB, board, 3);
     }
+    // Set per-game win threshold (clamped to >= 1).
+    public void setWinThreshold(int t) { this.winThreshold = Math.max(1, t); }
 
+    // Get per-game win threshold.
+    public int getWinThreshold() { return this.winThreshold; }
+
+    // Configure allowed power-up codes for this game (pass codes understood by PowerUpManager).
+    public void setAllowedPowerUps(Collection<String> codes) { pum.setAllowedCodes(codes); }
+
+    // Set a logger callback used by the model to emit textual messages (UI may display these).
     public void setLogger(ConsumerLogger l) { this.logger = l; }
 
+    // Functional interface for a simple text logger.
     public interface ConsumerLogger { void accept(String s); }
 
+    // Emit a text message to the configured logger (no-op by default).
     public void log(String s) { logger.accept(s); }
 
     // getters
+    //Get the player whose turn it currently is.
     public Player getCurrent() { return current; }
+
+    // Return the opponent of the given player.
     public Player getOpponent(Player p) { return p == playerA ? playerB : playerA; }
+
+    //Return the opponent of the current player.
     public Player getOpponentOfCurrent() { return getOpponent(current); }
 
     // Expose reverse sowing flag so UI can display current sow direction
+    // Whether sowing direction is currently reversed.
     public boolean isReverseSowing() { return reverseSowing; }
 
     // flags setters
+    // Enable/disable the double-capture effect for the next capture.
     public void setDoubleCapture(boolean v) { doubleCapture = v; }
+
+    // Grant or revoke an immediate bonus-turn condition.
     public void setBonusTurn(boolean v) { bonusTurn = v; }
+
+    // Set the reverse-sowing flag which affects the next sowing action.
     public void setReverseSowing(boolean v) { reverseSowing = v; }
+
+    // Cause the opponent to be skipped on their next turn.
     public void setSkipOpponent(boolean v) { skipOpponent = v; }
+
+    // Set whether a player's side is shielded (external helper).
     public void setShieldForPlayer(Player p, boolean v) { shielded.put(p, v); }
 
+    // Return whether the given player is currently shielded.
     public boolean isShielded(Player p) { return shielded.getOrDefault(p, false); }
+
+    // Return the two adjacent pit indices (left and right) on the circular board.
+    // The returned list contains [leftIndex, rightIndex].
 
     public List<Integer> getAdjacentIndices(int pitIdx) {
         List<Integer> out = new ArrayList<>();
@@ -81,21 +128,33 @@ public class SungkaGame {
         return out;
     }
 
-    // Protected pit API
+    // Protected pit API: set/remove a protected pit and its remaining turns.
+    // Passing a negative pitIndex removes protection for the player.
     public void setProtectedPit(Player p, int pitIndex, int turns) {
         if (pitIndex < 0) { protectedPit.remove(p); protectedPitTurns.remove(p); return; }
         protectedPit.put(p, pitIndex);
         protectedPitTurns.put(p, turns);
     }
+
+    // Return the index of the protected pit for a player, or null if none.
     public Integer getProtectedPit(Player p) { return protectedPit.get(p); }
+
+    // Return the remaining protection turns for the given player's protected pit.
     public Integer getProtectedPitTurns(Player p) { return protectedPitTurns.getOrDefault(p, 0); }
 
-    // Active power-up API
+
+    // Active power-up API: attach/get/clear the currently active power-up for a player.
     public void setActivePowerUp(Player p, sungka.powerups.PowerUp pu) { activePowerUp.put(p, pu); }
+
     public sungka.powerups.PowerUp getActivePowerUp(Player p) { return activePowerUp.get(p); }
+
     public void clearActivePowerUp(Player p) { activePowerUp.remove(p); }
 
+    // Return how many power-ups the player has used during the current turn.
     public int getPowerUpsUsedThisTurn(Player p) { return powerUpsUsedThisTurn.getOrDefault(p, 0); }
+
+    // Increment the per-turn activation counter for a player. When the
+    // activation budget is exceeded the player's side is cleared of power-ups.
     private void incrementPowerUpsUsed(Player p) {
         int now = getPowerUpsUsedThisTurn(p) + 1;
         powerUpsUsedThisTurn.put(p, now);
@@ -104,16 +163,27 @@ public class SungkaGame {
             wipePowerUpsForPlayer(p);
         }
     }
+
+    // Reset the per-turn activation counter for the provided player.
     private void resetPowerUpsUsed(Player p) { powerUpsUsedThisTurn.put(p, 0); }
 
-    /** Wipe all power-ups on the given player's side immediately. */
+    // Wipe all power-ups on the given player's side immediately.
     public void wipePowerUpsForPlayer(Player p) {
         for (int i = p.getStart(); i <= p.getEnd(); i++) board[i].clearPowerUp();
         log(p.getName() + " reached power-up limit: all power-ups on their side were wiped.");
     }
-
+    /*
+    Utility methods
+    Return the board index opposite to `pos` on the small-pit ring.
+    This mapping is used to compute the opposing pit for capture logic.
+    */ 
     private int oppositeOf(int pos) { return 14 - pos; }
-
+    /*
+    Execute a sowing move for the current player. Handles sowing direction,
+    skipping opponent house, captures (including double-capture), captured
+    power-up transfer/activation, and then advances the turn via endTurn().
+    Returns true if the move was valid and applied.
+    */
     public boolean makeMove(int pitIndex) {
         Pit startPit = board[pitIndex];
         if (!current.ownsPit(pitIndex) || startPit.isHouse() || startPit.getStones() == 0) return false;
@@ -134,8 +204,9 @@ public class SungkaGame {
         }
 
         if (pos == current.getHouseIndex()) {
-                    log(current.getName() + " landed in house and gets another turn.");
-                } else {
+            // landed in house — player keeps the turn (bonusTurn handled elsewhere)
+            log(current.getName() + " landed in house and gets another turn.");
+        } else {
                     if (current.ownsPit(pos) && !board[pos].isHouse() && board[pos].getStones() == 1) {
                         int oppPos = oppositeOf(pos);
                         Pit oppPit = board[oppPos];
@@ -187,16 +258,14 @@ public class SungkaGame {
                             }
                             doubleCapture = false;
                         }
-            }
-                endTurn(false);
+                            }
+                endTurn();
         }
         return true;
     }
 
-    /**
-     * Return the sequence of pit indices that would receive stones when sowing
-     * from the given pit index, in order. This does not modify game state.
-     */
+    // Return the sequence of pit indices that would receive stones when sowing
+    // from the given pit index. Does not modify game state.
     public List<Integer> previewSowSequence(int pitIndex) {
         List<Integer> seq = new ArrayList<>();
         if (!current.ownsPit(pitIndex)) return seq;
@@ -217,6 +286,8 @@ public class SungkaGame {
         return seq;
     }
 
+    // Activate the power-up in the specified pit (owned by current player).
+    // Enforces per-turn activation budget; returns true if activation occurred.
     public boolean activatePowerUpInPit(int pitIndex) {
         if (!current.ownsPit(pitIndex)) return false;
         Pit p = board[pitIndex];
@@ -235,17 +306,20 @@ public class SungkaGame {
         return true;
     }
 
-    /**
-     * Check if a player has reached the win threshold in their house.
-     * Returns the winning Player, or null if none.
-     */
+    // Return the player who reached the win threshold in their house, or null.
     public Player checkForWinner() {
-        if (board[playerA.getHouseIndex()].getStones() >= WIN_THRESHOLD) return playerA;
-        if (board[playerB.getHouseIndex()].getStones() >= WIN_THRESHOLD) return playerB;
+        if (board[playerA.getHouseIndex()].getStones() >= winThreshold) return playerA;
+        if (board[playerB.getHouseIndex()].getStones() >= winThreshold) return playerB;
         return null;
     }
-
-    private void endTurn(boolean activatedPowerUp) {
+    /*
+    Advance the turn, handling bonus-turn and skip-opponent flags.
+    Also refresh power-ups for the player who finished the round and
+    decrement any protected-pit timers.
+    Note: skipOpponent semantics intentionally cause the original player
+    to retain the turn after a skipped opponent (see implementation).
+    */
+    private void endTurn() {
         if (bonusTurn) {
             bonusTurn = false;
             log(current.getName() + " keeps turn due to BonusTurn.");
@@ -283,9 +357,7 @@ public class SungkaGame {
         }
     }
 
-    /**
-     * Clear existing power-ups on player's side and refill up to cap, skipping protected pit.
-     */
+    // Clear and refill up to `cap` power-ups on the player's side (skips protected pit).
     public void refreshPowerUpsForPlayer(Player player, int cap) {
         // clear current power-ups on player's side
         for (int i = player.getStart(); i <= player.getEnd(); i++) board[i].clearPowerUp();
@@ -303,14 +375,13 @@ public class SungkaGame {
             board[empties.get(k)].setPowerUp(pum.randomPowerUp());
         }
     }
-
-    /**
-     * Create a deep-ish clone of the current game suitable for AI simulation.
-     * Note: PowerUp instances are shared (they are stateless), but board/pits
-     * and player-turn state are duplicated and mapped to the cloned players.
-     */
-    @Override
-    public SungkaGame clone() {
+    /*
+    Create a fresh copy of the game for simulation. Note:
+    Pits are copied, but PowerUp instances are referenced (not deep-cloned).
+    PowerUpManager (`pum`) is shared between original and copy.
+    Logger is set to noop in copies to avoid noisy simulation logs.
+    */
+    public SungkaGame copy() {
         SungkaGame g2 = new SungkaGame();
 
         // replace board with copied pits
@@ -327,6 +398,10 @@ public class SungkaGame {
         g2.bonusTurn = this.bonusTurn;
         g2.reverseSowing = this.reverseSowing;
         g2.skipOpponent = this.skipOpponent;
+
+        // copy win threshold and power-up manager reference
+        g2.winThreshold = this.winThreshold;
+        g2.pum = this.pum;
 
         // copy shielded mapping by matching players
         g2.shielded.put(g2.playerA, this.shielded.getOrDefault(this.playerA, false));

@@ -1,10 +1,15 @@
 package sungka.gui;
 
+import sungka.config.GameConfig;
+
 import javax.swing.*;
 import java.awt.*;
 
-public class MainMenu extends JFrame {
+public final class MainMenu extends JFrame {
+    private static final long serialVersionUID = 1L;
+
     public MainMenu() {
+        // Note: do not cache GameConfig values here — read latest values when starting a new game.
         setTitle("Sungka - Main Menu");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout(10,10));
@@ -72,16 +77,24 @@ public class MainMenu extends JFrame {
             String side = (String) aiSide.getSelectedItem();
             boolean aiPlaysA = "Player A (top)".equals(side);
             String diff = (String) difficulty.getSelectedItem();
+            // Read latest central GameConfig now (so Configure changes are applied)
+            java.util.Set<String> cfgPUsNow = GameConfig.getInstance().getEnabledPowerUps();
+            int cfgThreshNow = GameConfig.getInstance().getWinThreshold();
             SwingUtilities.invokeLater(() -> {
-                new SungkaGUI(playVsAI, aiPlaysA, diff).setVisible(true);
+                new SungkaGUI(playVsAI, aiPlaysA, diff, cfgPUsNow, cfgThreshNow).setVisible(true);
             });
             dispose();
         });
 
+        JButton configure = new JButton("Configure Game");
+        configure.setAlignmentX(Component.CENTER_ALIGNMENT);
+        configure.setMaximumSize(new Dimension(200, 40));
+        configure.addActionListener(e -> showConfigDialog());
+
         JButton instructions = new JButton("Instructions");
         instructions.setAlignmentX(Component.CENTER_ALIGNMENT);
         instructions.setMaximumSize(new Dimension(200, 40));
-        instructions.addActionListener(e -> showInstructions());
+        instructions.addActionListener(e -> InstructionsDialog.show(this));
 
         JButton exit = new JButton("Exit");
         exit.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -90,6 +103,9 @@ public class MainMenu extends JFrame {
 
         center.add(newGame);
         center.add(Box.createRigidArea(new Dimension(0,10)));
+        center.add(configure);
+        center.add(Box.createRigidArea(new Dimension(0,10)));
+        center.add(Box.createRigidArea(new Dimension(0,10)));
         center.add(instructions);
         center.add(Box.createRigidArea(new Dimension(0,10)));
         center.add(exit);
@@ -97,7 +113,7 @@ public class MainMenu extends JFrame {
         add(center, BorderLayout.CENTER);
 
         JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        JLabel ver = new JLabel("v1.0");
+        JLabel ver = new JLabel("v3.0");
         footer.add(ver);
         add(footer, BorderLayout.SOUTH);
 
@@ -105,12 +121,26 @@ public class MainMenu extends JFrame {
         setLocationRelativeTo(null);
     }
 
-    private void showInstructions() {
-        String help = "Rules/Controls:\n" +
-                "- Click your own pit to play. If the pit contains a power-up, it will activate instead of sowing.\n" +
-                "- Capturing an opponent pit steals its power-up (moved to a random empty pit on your side).\n" +
-                "- After your turn ends, the system refills your side with random power-ups until you have 3.\n" +
-                "- Power-up codes shown on a pit: D(DoubleCapture), B(BonusTurn), R(Reverse), M(Magnet), S(StealShells), P(PitShield), A(AddShells), W(SwapHouses), K(SkipOpp), L(LuckyDrop).\n";
-        JOptionPane.showMessageDialog(this, help, "Instructions", JOptionPane.INFORMATION_MESSAGE);
+    private void showConfigDialog() {
+        PowerUpConfigPanel panel = new PowerUpConfigPanel();
+        JDialog dlg = new JDialog(this, "Game Configuration", true);
+        dlg.setLayout(new BorderLayout(8,8));
+        dlg.add(panel, BorderLayout.CENTER);
+
+        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton cancel = new JButton("Cancel");
+        JButton ok = new JButton("OK");
+        bottom.add(cancel); bottom.add(ok);
+        dlg.add(bottom, BorderLayout.SOUTH);
+
+        cancel.addActionListener(ev -> dlg.dispose());
+        ok.addActionListener(ev -> {
+            panel.applyToConfig();
+            dlg.dispose();
+        });
+
+        dlg.pack(); dlg.setLocationRelativeTo(this); dlg.setVisible(true);
     }
+
+    
 }
